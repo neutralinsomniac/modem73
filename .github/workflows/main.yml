@@ -60,8 +60,10 @@ jobs:
         if: matrix.cross_triple
         run: |
           sudo dpkg --add-architecture armhf
+          # Restrict the default Ubuntu mirror to amd64 (it has no armhf packages).
           sudo sed -i 's|^Signed-By:|Architectures: amd64\nSigned-By:|' \
             /etc/apt/sources.list.d/ubuntu.sources
+          # Add ports.ubuntu.com for armhf packages.
           sudo tee /etc/apt/sources.list.d/ubuntu-armhf.sources >/dev/null <<'EOF'
           Types: deb
           URIs: http://ports.ubuntu.com/ubuntu-ports/
@@ -178,9 +180,9 @@ jobs:
           make -f Makefile.deb \
                CC="$CC" CXX="$CXX" \
                ARCH_FLAGS="${{ matrix.arch_flags }}" \
-               AICODIX_DSP=../../dsp \
-               AICODIX_CODE=../../code \
-               MODEM_SRC=../../modem \
+               AICODIX_DSP=../dsp \
+               AICODIX_CODE=../code \
+               MODEM_SRC=../modem \
                -j"$(nproc)"
 
       - name: Stage install tree
