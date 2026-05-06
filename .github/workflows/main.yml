@@ -171,10 +171,12 @@ jobs:
 
       - name: Build
         working-directory: m73
-        env:
+        env: &build_env
           CC: ${{ matrix.cross_triple && format('{0}-gcc', matrix.cross_triple) || 'gcc' }}
           CXX: ${{ matrix.cross_triple && format('{0}-g++', matrix.cross_triple) || 'g++' }}
-          # Force pkg-config to look only at the cross arch's .pc files.
+          # Force pkg-config to look only at the cross arch's .pc files. These
+          # also need to be set during `make install` so the install target's
+          # HIDAPI_LIBS check stays consistent with the build's.
           PKG_CONFIG_PATH: ${{ matrix.cross_triple && format('/usr/lib/{0}/pkgconfig', matrix.cross_triple) || '' }}
           PKG_CONFIG_LIBDIR: ${{ matrix.cross_triple && format('/usr/lib/{0}/pkgconfig:/usr/share/pkgconfig', matrix.cross_triple) || '' }}
         run: |
@@ -188,11 +190,22 @@ jobs:
 
       - name: Stage install tree
         working-directory: m73
+        env: *build_env
         run: |
           make -f Makefile.deb install DESTDIR=../staging PREFIX=/usr
 
       - name: Build .deb with fpm
         run: |
+          # Only include lib/ in the package if the udev rules actually got
+          # installed there (i.e. CM108/hidapi support was enabled).
+          PATHS="usr"
+          if [ -d staging/lib ]; then
+            PATHS="$PATHS lib"
+            HIDAPI_DEP="-d libhidapi-hidraw0"
+          else
+            HIDAPI_DEP=""
+            echo "Note: built without CM108 support — libhidapi-hidraw0 dep omitted."
+          fi
           # ncurses/tinfo went through the time_t-64 transition in 2024 — accept
           # either name so the package installs on pre- and post-t64 systems.
           fpm -s dir -t deb \
@@ -207,11 +220,11 @@ jobs:
             -d 'libstdc++6' \
             -d 'libncurses6 | libncurses6t64' \
             -d 'libtinfo6 | libtinfo6t64' \
-            -d libhidapi-hidraw0 \
+            $HIDAPI_DEP \
             --deb-no-default-config-files \
             -C staging \
             -p "modem73_${{ steps.ver.outputs.version }}_${{ matrix.arch }}.deb" \
-            usr lib
+            $PATHS
 
       - name: Generate checksums
         run: |
