@@ -2,3 +2,5 @@ miniaudio.o
 modem73
 TODO
 test-dual.sh
+nohup.out
+modem73.log

@@ -11,6 +11,7 @@
 #endif
 #include <vector>
 #include <list>
+#include <set>
 #include <mutex>
 #include <memory>
 #include <random>
@@ -1156,6 +1157,72 @@ public:
     }
 };
 
+// Load key=value settings from path into config when --config is passed
+static bool apply_settings_file(const std::string& path, TNCConfig& config,
+                                const std::set<std::string>& cli_set) {
+    static const char* MOD_OPTS[] = {
+        "BPSK", "QPSK", "8PSK", "QAM16", "QAM64", "QAM256", "QAM1024", "QAM4096"
+    };
+    static const int N_MOD = sizeof(MOD_OPTS) / sizeof(*MOD_OPTS);
+    static const char* RATE_OPTS[] = {"1/2", "2/3", "3/4", "5/6", "1/4"};
+    static const int N_RATE = sizeof(RATE_OPTS) / sizeof(*RATE_OPTS);
+
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return false;
+
+    auto take = [&](const char* k) {
+        return cli_set.find(k) == cli_set.end();
+    };
+
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char key[64], value[192];
+        if (sscanf(line, "%63[^=]=%191[^\n]", key, value) != 2) continue;
+
+        if (!strcmp(key, "callsign") && take(key)) config.callsign = value;
+        else if (!strcmp(key, "modem_type") && take(key)) config.modem_type = atoi(value);
+        else if (!strcmp(key, "mfsk_mode") && take(key)) config.mfsk_mode = atoi(value);
+        else if (!strcmp(key, "modulation") && take(key)) {
+            int idx = atoi(value);
+            if (idx >= 0 && idx < N_MOD) config.modulation = MOD_OPTS[idx];
+        }
+        else if (!strcmp(key, "code_rate") && take(key)) {
+            int idx = atoi(value);
+            if (idx >= 0 && idx < N_RATE) config.code_rate = RATE_OPTS[idx];
+        }
+        else if (!strcmp(key, "short_frame") && take(key)) config.short_frame = atoi(value) != 0;
+        else if (!strcmp(key, "center_freq") && take(key)) config.center_freq = atoi(value);
+        else if (!strcmp(key, "csma_enabled") && take(key)) config.csma_enabled = atoi(value) != 0;
+        else if (!strcmp(key, "carrier_threshold_db") && take(key)) config.carrier_threshold_db = atof(value);
+        else if (!strcmp(key, "slot_time_ms") && take(key)) config.slot_time_ms = atoi(value);
+        else if (!strcmp(key, "p_persistence") && take(key)) config.p_persistence = atoi(value);
+        else if (!strcmp(key, "fragmentation_enabled") && take(key)) config.fragmentation_enabled = atoi(value) != 0;
+        else if (!strcmp(key, "tx_blanking_enabled") && take(key)) config.tx_blanking_enabled = atoi(value) != 0;
+        else if (!strcmp(key, "audio_input") && take(key)) config.audio_input_device = value;
+        else if (!strcmp(key, "audio_output") && take(key)) config.audio_output_device = value;
+        else if (!strcmp(key, "audio_device")) {
+            if (take("audio_input")) config.audio_input_device = value;
+            if (take("audio_output")) config.audio_output_device = value;
+        }
+        else if (!strcmp(key, "ptt_type") && take(key)) config.ptt_type = static_cast<PTTType>(atoi(value));
+        else if (!strcmp(key, "vox_tone_freq") && take(key)) config.vox_tone_freq = atoi(value);
+        else if (!strcmp(key, "vox_lead_ms") && take(key)) config.vox_lead_ms = atoi(value);
+        else if (!strcmp(key, "vox_tail_ms") && take(key)) config.vox_tail_ms = atoi(value);
+        else if (!strcmp(key, "com_port") && take(key)) config.com_port = value;
+        else if (!strcmp(key, "com_ptt_line") && take(key)) config.com_ptt_line = atoi(value);
+        else if (!strcmp(key, "com_invert_dtr") && take(key)) config.com_invert_dtr = atoi(value) != 0;
+        else if (!strcmp(key, "com_invert_rts") && take(key)) config.com_invert_rts = atoi(value) != 0;
+#ifdef WITH_CM108
+        else if (!strcmp(key, "cm108_gpio") && take(key)) config.cm108_gpio = atoi(value);
+#endif
+        else if (!strcmp(key, "port") && take(key)) config.port = atoi(value);
+    }
+
+    fclose(f);
+    return true;
+}
+
 void print_help(const char* prog) {
     std::cerr << "MODEM73\n\n"
               << "Usage: " << prog << " [options]\n\n"
@@ -1180,7 +1247,8 @@ void print_help(const char* prog) {
               << " (default: rigctl)\n"
               << "  --rigctl HOST:PORT      Rigctl address (default: localhost:4532)\n"
               << "  --com-port PORT         Serial port for COM PTT (default: /dev/ttyUSB0)\n"
-              << "  --com-line LINE         COM PTT line: dtr, rts, both (default: rts)\n"
+              << "  --com-line LINE         COM PTT line: dtr, rts, both, -dtr, -rts, -both\n"
+              << "                          (prefix '-' inverts polarity; default: rts)\n"
               << "  --vox-freq HZ           VOX tone frequency (default: 1200)\n"
               << "  --vox-lead MS           VOX lead time in ms (default: 150)\n"
               << "  --vox-tail MS           VOX tail time in ms (default: 100)\n"
@@ -1205,6 +1273,8 @@ void print_help(const char* prog) {
               << "  -h, --headless          Run without TUI\n"
 #endif
               << "  -v, --verbose           Verbose output\n"
+              << "  --config [FILE]         Load options from FILE\n"
+              << "                          (defaults to ~/.config/modem73/settings)\n"
               << "  --help                  Show this help\n"
               << "\nSettings are saved to ~/.config/modem73/settings\n";
 }
@@ -1213,10 +1283,9 @@ int main(int argc, char** argv) {
     TNCConfig config;
 
     // Track which settings were explicitly set on CLI
-    bool cli_port = false;
+    std::set<std::string> cli_set;
     bool cli_control_port = false;
-    bool cli_callsign = false;
-    bool cli_ptt = false;
+    bool cli_config = false;
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -1245,33 +1314,53 @@ int main(int argc, char** argv) {
 #endif
         } else if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
             config.port = std::atoi(argv[++i]);
-            cli_port = true;
+            cli_set.insert("port");
         } else if (arg == "--control-port" && i + 1 < argc) {
             config.control_port = std::atoi(argv[++i]);
             cli_control_port = true;
+        } else if (arg == "--config") {
+            cli_config = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                config.config_file = argv[++i];
+            } else {
+                const char* home = getenv("HOME");
+                if (home) {
+                    config.config_file = std::string(home) + "/.config/modem73/settings";
+                }
+            }
         } else if ((arg == "-d" || arg == "--device") && i + 1 < argc) {
             // Set both input and output to same device
             config.audio_input_device = argv[++i];
             config.audio_output_device = config.audio_input_device;
+            cli_set.insert("audio_input");
+            cli_set.insert("audio_output");
         } else if (arg == "--input-device" && i + 1 < argc) {
             config.audio_input_device = argv[++i];
+            cli_set.insert("audio_input");
         } else if (arg == "--output-device" && i + 1 < argc) {
             config.audio_output_device = argv[++i];
+            cli_set.insert("audio_output");
         } else if ((arg == "-c" || arg == "--callsign") && i + 1 < argc) {
             config.callsign = argv[++i];
-            cli_callsign = true;
+            cli_set.insert("callsign");
         } else if ((arg == "-m" || arg == "--modulation") && i + 1 < argc) {
             config.modulation = argv[++i];
+            cli_set.insert("modulation");
         } else if ((arg == "-r" || arg == "--rate") && i + 1 < argc) {
             config.code_rate = argv[++i];
+            cli_set.insert("code_rate");
         } else if ((arg == "-f" || arg == "--freq") && i + 1 < argc) {
             config.center_freq = std::atoi(argv[++i]);
+            cli_set.insert("center_freq");
         } else if (arg == "--short") {
             config.short_frame = true;
+            cli_set.insert("short_frame");
         } else if (arg == "--normal") {
             config.short_frame = false;
+            cli_set.insert("short_frame");
         } else if (arg == "--rigctl" && i + 1 < argc) {
             config.ptt_type = PTTType::RIGCTL;
+            cli_set.insert("ptt_type");
             std::string hostport = argv[++i];
             size_t colon = hostport.find(':');
             if (colon != std::string::npos) {
@@ -1282,17 +1371,43 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--com-port" && i + 1 < argc) {
             config.com_port = argv[++i];
+            cli_set.insert("com_port");
         } else if (arg == "--com-line" && i + 1 < argc) {
             std::string line = argv[++i];
-            if (line == "dtr") config.com_ptt_line = 0;
-            else if (line == "rts") config.com_ptt_line = 1;
-            else if (line == "both") config.com_ptt_line = 2;
-            else {
-                std::cerr << "Unknown COM PTT line: " << line << " (use dtr, rts, or both)\n";
+            bool invert_specified = false;
+            if (line == "dtr") {
+                config.com_ptt_line = 0;
+            } else if (line == "rts") {
+                config.com_ptt_line = 1;
+            } else if (line == "both") {
+                config.com_ptt_line = 2;
+            } else if (line == "-dtr") {
+                config.com_ptt_line = 0;
+                config.com_invert_dtr = true;
+                config.com_invert_rts = false;
+                invert_specified = true;
+            } else if (line == "-rts") {
+                config.com_ptt_line = 1;
+                config.com_invert_dtr = false;
+                config.com_invert_rts = true;
+                invert_specified = true;
+            } else if (line == "-both") {
+                config.com_ptt_line = 2;
+                config.com_invert_dtr = true;
+                config.com_invert_rts = true;
+                invert_specified = true;
+            } else {
+                std::cerr << "Unknown COM PTT line: " << line
+                          << " (use dtr, rts, both, -dtr, -rts, -both)\n";
                 return 1;
             }
+            cli_set.insert("com_ptt_line");
+            if (invert_specified) {
+                cli_set.insert("com_invert_dtr");
+                cli_set.insert("com_invert_rts");
+            }
         } else if (arg == "--ptt" && i + 1 < argc) {
-            cli_ptt = true;
+            cli_set.insert("ptt_type");
             std::string ptt_type = argv[++i];
             if (ptt_type == "none") config.ptt_type = PTTType::NONE;
             else if (ptt_type == "rigctl") config.ptt_type = PTTType::RIGCTL;
@@ -1311,36 +1426,49 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--vox-freq" && i + 1 < argc) {
             config.vox_tone_freq = std::atoi(argv[++i]);
+            cli_set.insert("vox_tone_freq");
         } else if (arg == "--vox-lead" && i + 1 < argc) {
             config.vox_lead_ms = std::atoi(argv[++i]);
+            cli_set.insert("vox_lead_ms");
         } else if (arg == "--vox-tail" && i + 1 < argc) {
             config.vox_tail_ms = std::atoi(argv[++i]);
+            cli_set.insert("vox_tail_ms");
 #ifdef WITH_CM108
         } else if (arg == "--cm108-gpio" && i + 1 < argc) {
             config.cm108_gpio = std::atoi(argv[++i]);
+            cli_set.insert("cm108_gpio");
 #endif
         } else if (arg == "--ptt-delay" && i + 1 < argc) {
             config.ptt_delay_ms = std::atoi(argv[++i]);
         } else if (arg == "--ptt-tail" && i + 1 < argc) {
             config.ptt_tail_ms = std::atoi(argv[++i]);
         } else if (arg == "--no-rigctl") {
-            config.ptt_type = PTTType::NONE; 
+            config.ptt_type = PTTType::NONE;
+            cli_set.insert("ptt_type");
         } else if (arg == "--no-csma") {
             config.csma_enabled = false;
+            cli_set.insert("csma_enabled");
         } else if (arg == "--csma-threshold" && i + 1 < argc) {
             config.carrier_threshold_db = std::atof(argv[++i]);
+            cli_set.insert("carrier_threshold_db");
         } else if (arg == "--csma-slot" && i + 1 < argc) {
             config.slot_time_ms = std::atoi(argv[++i]);
+            cli_set.insert("slot_time_ms");
         } else if (arg == "--csma-persist" && i + 1 < argc) {
             config.p_persistence = std::atoi(argv[++i]);
+            cli_set.insert("p_persistence");
         } else if (arg == "--frag") {
             config.fragmentation_enabled = true;
+            cli_set.insert("fragmentation_enabled");
         } else if (arg == "--no-frag") {
             config.fragmentation_enabled = false;
+            cli_set.insert("fragmentation_enabled");
         } else if (arg == "--tx-blank") {
             config.tx_blanking_enabled = true;
+            cli_set.insert("tx_blanking_enabled");
         } else if (arg == "--no-tx-blank") {
             config.tx_blanking_enabled = false;
+            cli_set.insert("tx_blanking_enabled");
         } else {
             std::cerr << "Unknown option: " << arg << std::endl;
             print_help(argv[0]);
@@ -1352,7 +1480,15 @@ int main(int argc, char** argv) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     signal(SIGPIPE, SIG_IGN);
-    
+
+    if (!g_use_ui && cli_config && !config.config_file.empty()) {
+        if (apply_settings_file(config.config_file, config, cli_set)) {
+            std::cerr << "Loaded settings from " << config.config_file << std::endl;
+        } else {
+            std::cerr << "Could not read config file: " << config.config_file << std::endl;
+        }
+    }
+
 #ifdef WITH_UI
     TNCUIState ui_state;
     if (g_use_ui) {
@@ -1363,7 +1499,9 @@ int main(int argc, char** argv) {
         if (home) {
             std::string config_dir = std::string(home) + "/.config/modem73";
             mkdir(config_dir.c_str(), 0755);
-            ui_state.config_file = config_dir + "/settings";
+            ui_state.config_file = cli_config && !config.config_file.empty()
+                                       ? config.config_file
+                                       : config_dir + "/settings";
             ui_state.presets_file = config_dir + "/presets";
             
             auto input_devices = MiniAudio::list_capture_devices();
@@ -1389,7 +1527,7 @@ int main(int argc, char** argv) {
             // Try to load saved settings
             if (ui_state.load_settings()) {
                 // Apply loaded settings to config
-                if (!cli_callsign)
+                if (!cli_set.count("callsign"))
                     config.callsign = ui_state.callsign;
                 config.modem_type = ui_state.modem_type_index;
                 config.mfsk_mode = ui_state.mfsk_mode_index;
@@ -1407,7 +1545,7 @@ int main(int argc, char** argv) {
                 config.audio_input_device = ui_state.audio_input_device;
                 config.audio_output_device = ui_state.audio_output_device;
                 // PTT settings
-                if (!cli_ptt)
+                if (!cli_set.count("ptt_type"))
                     config.ptt_type = static_cast<PTTType>(ui_state.ptt_type_index);
                 config.vox_tone_freq = ui_state.vox_tone_freq;
                 config.vox_lead_ms = ui_state.vox_lead_ms;
@@ -1420,8 +1558,8 @@ int main(int argc, char** argv) {
                 config.com_invert_rts = ui_state.com_invert_rts;
 
 
-                // Network settings 
-                if (!cli_port)
+                // Network settings
+                if (!cli_set.count("port"))
                     config.port = ui_state.port;
 
                 // Find audio device indices
