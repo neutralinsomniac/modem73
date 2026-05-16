@@ -1,0 +1,112 @@
+{
+  "nodes": {
+    "aicodix-code": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778244579,
+        "narHash": "sha256-lrtz+9etqng6TqGBud3ctOhKIMErlJzlrpRC3VNWKn4=",
+        "owner": "aicodix",
+        "repo": "code",
+        "rev": "ab79d7575dfba8767d95886159650c102f2157e4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "aicodix",
+        "repo": "code",
+        "type": "github"
+      }
+    },
+    "aicodix-dsp": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1753856624,
+        "narHash": "sha256-EJPyjP6jEE8BTfcplxO4hlY4j3uhioFmDSiO/3h/DCo=",
+        "owner": "aicodix",
+        "repo": "dsp",
+        "rev": "8246c5b5dd9c35124bbf88538c8b75e748adb9c9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "aicodix",
+        "repo": "dsp",
+        "type": "github"
+      }
+    },
+    "aicodix-modem": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1764055593,
+        "narHash": "sha256-7lOd6sN7TeT9V6ibukX4SD5xMv6lPI/b7msEqkI12kU=",
+        "owner": "aicodix",
+        "repo": "modem",
+        "rev": "a4a8b57769679cf0fd3f5b4941f246b5e3718ee9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "aicodix",
+        "repo": "modem",
+        "type": "github"
+      }
+    },
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1778869304,
+        "narHash": "sha256-30sZNZoA1cqF5JNO9fVX+wgiQYjB7HJqqJ4ztCDeBZE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "aicodix-code": "aicodix-code",
+        "aicodix-dsp": "aicodix-dsp",
+        "aicodix-modem": "aicodix-modem",
+        "flake-utils": "flake-utils",
+        "nixpkgs": "nixpkgs"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
